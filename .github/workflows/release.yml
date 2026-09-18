@@ -1,0 +1,117 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example v0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            asset: clouddrive-decrypt-linux-x86_64.tar.gz
+          - name: linux-aarch64
+            os: ubuntu-24.04-arm
+            asset: clouddrive-decrypt-linux-aarch64.tar.gz
+          - name: windows-x86_64
+            os: windows-latest
+            asset: clouddrive-decrypt-windows-x86_64.zip
+          - name: macos-aarch64
+            os: macos-latest
+            asset: clouddrive-decrypt-macos-aarch64.tar.gz
+          - name: macos-x86_64
+            os: macos-15-intel
+            asset: clouddrive-decrypt-macos-x86_64.tar.gz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up stable Rust
+        shell: bash
+        run: |
+          rustup update stable
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Package Unix binary
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          ASSET: ${{ matrix.asset }}
+        run: |
+          mkdir -p package
+          cp target/release/clouddrive-decrypt package/
+          tar -C package -czf "$ASSET" clouddrive-decrypt
+
+      - name: Package Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          ASSET: ${{ matrix.asset }}
+        run: |
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item target/release/clouddrive-decrypt.exe package/clouddrive-decrypt.exe
+          Compress-Archive -Path package/clouddrive-decrypt.exe -DestinationPath $env:ASSET -Force
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Show release files
+        shell: bash
+        run: ls -lah dist
+
+      - name: Create or update GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; replacing assets."
+            gh release upload "$TAG" dist/*               --repo "$GITHUB_REPOSITORY"               --clobber
+          else
+            echo "Creating release $TAG."
+            gh release create "$TAG" dist/*               --repo "$GITHUB_REPOSITORY"               --title "$TAG"               --generate-notes               --target "$GITHUB_SHA"
+          fi
