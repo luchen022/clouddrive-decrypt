@@ -31,12 +31,49 @@ fn decrypt_file_name(name: &str, password: &str) -> Result<String, String> {
         Ok(String::from_utf8_lossy(&decrpted_bytes).to_string())
     }
 }
+
+fn print_usage(program: &str) {
+    println!("Usage:");
+    println!("  {} <input_file> <password>", program);
+    println!("  {} --name <encrypted_name.cdcrypto> <password>", program);
+    println!("  {} -n <encrypted_name.cdcrypto> <password>", program);
+}
+
 fn main() -> io::Result<()> {
     let args: Vec<String> = std::env::args().collect();
+
+    // Name-only mode. This decrypts an encrypted CloudDrive2 file/folder name
+    // without opening or decrypting the file contents.
+    if args.get(1).map(String::as_str) == Some("--name")
+        || args.get(1).map(String::as_str) == Some("-n")
+    {
+        if args.len() != 4 {
+            print_usage(&args[0]);
+            std::process::exit(1);
+        }
+
+        let encrypted_name = &args[2];
+        let password = &args[3];
+
+        match decrypt_file_name(encrypted_name, password) {
+            Ok(name) => {
+                println!("{}", name);
+                return Ok(());
+            }
+            Err(err) => {
+                eprintln!("Failed to decrypt name: {}", err);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Preserve the original CLI behavior:
+    // clouddrive-decrypt <input_file> <password>
     if args.len() < 3 {
-        println!("Usage: {} <input_file> <password>", args[0]);
+        print_usage(&args[0]);
         std::process::exit(0);
     }
+
     let input_file_path = &args[1];
     let password = &args[2];
     let encrypted_file_name = PathBuf::from(input_file_path)
