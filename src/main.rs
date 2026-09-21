@@ -8,6 +8,7 @@ extern crate lazy_static;
 
 const CLOUDFS_CRYPT_DOT_SURFIX: &str = ".cdcrypto";
 const FILE_NAME_SALT_SIZE: usize = 8;
+const AES_BLOCK_SIZE: usize = 16;
 
 pub mod aes_decrypt;
 pub mod base_utf8_decode;
@@ -18,7 +19,15 @@ fn decrypt_file_name(name: &str, password: &str) -> Result<String, String> {
         Err(format!("invalid file extension"))
     } else {
         let encoded_name = name.trim_end_matches(CLOUDFS_CRYPT_DOT_SURFIX);
-        let encoded_bytes = crate::base_utf8_decode::decode(encoded_name);
+        let mut encoded_bytes = crate::base_utf8_decode::decode(encoded_name);
+        // The encoded bytes are the salt plus whole AES blocks. A name whose last
+        // character is both data and a padding marker can read two ways; when the
+        // marker reading does not give whole blocks, the character is data.
+        if !file_name_bytes_are_whole_blocks(&encoded_bytes)
+            && crate::base_utf8_decode::ends_with_padding_marker(encoded_name)
+        {
+            encoded_bytes = crate::base_utf8_decode::decode_last_as_data(encoded_name);
+        }
         if encoded_bytes.len() <= FILE_NAME_SALT_SIZE {
             return Err(format!("invalid file name"));
         }
@@ -30,6 +39,10 @@ fn decrypt_file_name(name: &str, password: &str) -> Result<String, String> {
         .map_err(|_| format!("invalid file name or password"))?;
         Ok(String::from_utf8_lossy(&decrpted_bytes).to_string())
     }
+}
+fn file_name_bytes_are_whole_blocks(encoded_bytes: &[u8]) -> bool {
+    encoded_bytes.len() > FILE_NAME_SALT_SIZE
+        && (encoded_bytes.len() - FILE_NAME_SALT_SIZE) % AES_BLOCK_SIZE == 0
 }
 fn main() -> io::Result<()> {
     let args: Vec<String> = std::env::args().collect();
