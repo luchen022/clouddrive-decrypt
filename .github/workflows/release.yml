@@ -110,8 +110,14 @@ jobs:
 
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $TAG already exists; replacing assets."
-            gh release upload "$TAG" dist/*               --repo "$GITHUB_REPOSITORY"               --clobber
+            gh release upload "$TAG" dist/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
           else
             echo "Creating release $TAG."
-            gh release create "$TAG" dist/*               --repo "$GITHUB_REPOSITORY"               --title "$TAG"               --generate-notes               --target "$GITHUB_SHA"
+            gh release create "$TAG" dist/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG" \
+              --generate-notes \
+              --target "$GITHUB_SHA"
           fi
